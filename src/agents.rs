@@ -806,7 +806,22 @@ pub const AGENTS: &[AgentDef] = &[
         // swallowed as newlines instead of triggering submit. 150ms > 120ms.
         send_keys_enter_delay_ms: 150,
         install_hint: "npm install -g @openai/codex",
-        permission_response: None,
+        // Codex's approval menu starts on Allow. Its persistent Always allow
+        // choice is two steps below it, and Cancel is three.
+        permission_response: Some(PermissionResponse {
+            allow: &[KeyToken::Named("Enter")],
+            allow_always: Some(&[
+                KeyToken::Named("Down"),
+                KeyToken::Named("Down"),
+                KeyToken::Named("Enter"),
+            ]),
+            deny: &[
+                KeyToken::Named("Down"),
+                KeyToken::Named("Down"),
+                KeyToken::Named("Down"),
+                KeyToken::Named("Enter"),
+            ],
+        }),
     },
     AgentDef {
         name: "gemini",
@@ -2178,6 +2193,35 @@ mod tests {
         assert_eq!(send_keys_enter_delay("kiro"), 0);
         assert_eq!(send_keys_enter_delay("antigravity"), 0);
         assert_eq!(send_keys_enter_delay("unknown_agent"), 0);
+    }
+
+    #[test]
+    fn test_codex_permission_response_mapping() {
+        let response = get_agent("codex")
+            .unwrap()
+            .permission_response
+            .expect("codex declares permission response keys");
+
+        assert_eq!(response.allow, &[KeyToken::Named("Enter")]);
+        assert_eq!(
+            response.allow_always,
+            Some(
+                &[
+                    KeyToken::Named("Down"),
+                    KeyToken::Named("Down"),
+                    KeyToken::Named("Enter"),
+                ][..]
+            )
+        );
+        assert_eq!(
+            response.deny,
+            &[
+                KeyToken::Named("Down"),
+                KeyToken::Named("Down"),
+                KeyToken::Named("Down"),
+                KeyToken::Named("Enter"),
+            ]
+        );
     }
 
     #[test]
