@@ -935,20 +935,21 @@ mod tests {
         );
     }
 
+    const ATOMIC_REPLY_NAME: &str = "integration-omp.agent-of-empires.reply.json";
+    const ATOMIC_REPLY_RESPONSE: &[u8] = br#"{"response":{"kind":"approval","choice":"allow"}}"#;
+
+    #[test]
+    #[ignore = "invoked by the restrictive-umask regression in an isolated process"]
+    fn write_atomic_reply_child() {
+        let _guard = BaseGuard::with_base(std::env::current_dir().unwrap());
+        let dir = open_instance_dir("atomic_reply").unwrap();
+        write_atomic(dir.as_fd(), ATOMIC_REPLY_NAME, ATOMIC_REPLY_RESPONSE).unwrap();
+    }
+
     #[test]
     #[serial(hook_base)]
     fn atomic_reply_stays_owner_readable_under_restrictive_umask() {
-        const CHILD_BASE: &str = "AOE_HOOK_ATOMIC_UMASK_CHILD_BASE";
-        const NAME: &str = "integration-omp.agent-of-empires.reply.json";
-        const RESPONSE: &[u8] = br#"{"response":{"kind":"approval","choice":"allow"}}"#;
-        if let Some(base) = std::env::var_os(CHILD_BASE) {
-            let _guard = BaseGuard::with_base(base.into());
-            let dir = open_instance_dir("atomic_reply").unwrap();
-            // Only this isolated, single-test child changes its process umask.
-            nix::sys::stat::umask(Mode::from_bits_truncate(0o777));
-            write_atomic(dir.as_fd(), NAME, RESPONSE).unwrap();
-            return;
-        }
+        use std::os::unix::process::CommandExt;
 
         let (_guard, base, _tmp) = BaseGuard::ready();
         let dir = open_instance_dir("atomic_reply").unwrap();
@@ -957,11 +958,19 @@ mod tests {
         command
             .args([
                 "--exact",
-                &format!("{module}::atomic_reply_stays_owner_readable_under_restrictive_umask"),
+                &format!("{module}::write_atomic_reply_child"),
+                "--ignored",
                 "--nocapture",
                 "--test-threads=1",
             ])
-            .env(CHILD_BASE, &base);
+            .current_dir(&base);
+        // SAFETY: umask is async-signal-safe and runs only in the child before exec.
+        unsafe {
+            command.pre_exec(|| {
+                nix::sys::stat::umask(Mode::from_bits_truncate(0o777));
+                Ok(())
+            });
+        }
         let output = crate::process::run_with_timeout_process_group(
             &mut command,
             std::time::Duration::from_secs(20),
@@ -974,11 +983,11 @@ mod tests {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        let (metadata, bytes) = read_file_with_metadata_at(dir.as_fd(), NAME, 4096)
+        let (metadata, bytes) = read_file_with_metadata_at(dir.as_fd(), ATOMIC_REPLY_NAME, 4096)
             .unwrap()
             .expect("child must publish the completed reply");
         assert_eq!(metadata.permissions().mode() & 0o7777, 0o600);
-        assert_eq!(bytes, RESPONSE);
+        assert_eq!(bytes, ATOMIC_REPLY_RESPONSE);
         assert_eq!(
             std::fs::read_dir(base.join("atomic_reply"))
                 .unwrap()
