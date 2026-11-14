@@ -2246,9 +2246,8 @@ pub enum SidebarPosition {
     Right,
 }
 
-/// How the TUI arranges the session list and preview on a narrow terminal,
-/// below [`crate::tui::responsive::STACKED_BREAKPOINT`]. See
-/// `SessionConfig::narrow_layout`.
+/// How the TUI arranges the session list and preview on a narrow terminal, below
+/// 80 columns. See `SessionConfig::narrow_layout`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NarrowLayout {
