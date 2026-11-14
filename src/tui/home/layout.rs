@@ -15,6 +15,26 @@ impl HomeView {
         self.save_list_width();
     }
 
+    /// The narrow layout to render now. `OnePane` swaps the list for the preview in live
+    /// mode, so a Structured view Session keeps the stack instead: its transcript has no
+    /// live mode, and hiding it would leave no way back to it. A System Health takeover
+    /// already replaces the preview, so it can use the full screen.
+    pub(super) fn narrow_layout_for_render(&self) -> crate::session::config::NarrowLayout {
+        use crate::session::config::NarrowLayout;
+        let no_live_pane = self
+            .selected_session
+            .as_deref()
+            .is_some_and(|id| self.live_key(id).is_none());
+        if matches!(self.narrow_layout, NarrowLayout::OnePane)
+            && no_live_pane
+            && !self.system_health_open
+        {
+            NarrowLayout::Stacked
+        } else {
+            self.narrow_layout
+        }
+    }
+
     pub fn toggle_sidebar_collapsed(&mut self) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
         let collapsed = self.sidebar_collapsed;
