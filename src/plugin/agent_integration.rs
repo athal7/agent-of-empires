@@ -2744,6 +2744,64 @@ command = "acme-omp-shim"
         );
     }
 
+    /// An owned status leaves no cached capture behind: a read that predates it
+    /// would keep the owned verdict once pane rules take over again.
+    #[test]
+    #[serial_test::serial(hook_base)]
+    fn an_owned_status_clears_the_pane_capture_cache() {
+        if !crate::tmux::test_helpers::tmux_available() {
+            eprintln!("Skipping test: tmux not available");
+            return;
+        }
+        let (_base, _base_path, _hook_tmp) = crate::hooks::test_support::BaseGuard::ready();
+        let temp = tempfile::tempdir().unwrap();
+        let _reload = super::super::ReloadRegistryOnDrop;
+        let _env = crate::session::test_support::EnvGuard::set(&[
+            ("HOME", temp.path()),
+            ("XDG_CONFIG_HOME", temp.path()),
+            ("USERPROFILE", temp.path()),
+        ]);
+        let _featured = crate::session::test_support::EnvGuard::unset(&["AOE_FEATURED_INDEX_PATH"]);
+        install_test_integration("acme.integration-cache", "cache-agent");
+        super::super::reload_registry();
+
+        let mut instance = Instance::new("integration-cache-test", "/tmp");
+        instance.tool = "cache-agent".into();
+        instance.status = crate::session::Status::Running;
+        let tmux = crate::tmux::Session::new(&instance.id, &instance.title).unwrap();
+        tmux.create("/tmp", Some("exec sleep 300"), "default")
+            .unwrap();
+        struct KillSession(crate::tmux::Session);
+        impl Drop for KillSession {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+            }
+        }
+        let _kill = KillSession(crate::tmux::Session::from_name(tmux.name()));
+
+        let dir = dir_guard::open_instance_dir(&instance.id).unwrap();
+        let leaf = "integration-acme.integration-cache.json";
+        let mut report = snapshot();
+        report.instance_id = instance.id.clone();
+        report.writer_pid = std::process::id();
+
+        // A pane-rules poll leaves a cached capture behind for the owned poll
+        // to invalidate.
+        instance.detection.activity = Some(1);
+        instance.detection.captured_at = Some(2);
+        report.provider_version = "18.11.1".into();
+        dir_guard::write_atomic(dir.as_fd(), leaf, &serde_json::to_vec(&report).unwrap()).unwrap();
+        instance.update_status_once(None, Some(tmux.name()));
+        assert_eq!(
+            instance.detection.rule.as_deref(),
+            Some(OWNED_RULE),
+            "an approved provider owns the status"
+        );
+        assert_eq!(instance.detection.activity, None);
+        assert_eq!(instance.detection.captured_at, None);
+        assert_eq!(instance.detection.observation_key, None);
+    }
+
     #[test]
     #[serial_test::serial(hook_base)]
     fn respond_writes_private_reply_and_delivers_declared_wake_key() {
